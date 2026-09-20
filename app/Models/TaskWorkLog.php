@@ -1,0 +1,51 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class TaskWorkLog extends Model
+{
+    use HasFactory;
+
+    protected $fillable = [
+        'task_id',
+        'user_id',
+        'started_at',
+        'ended_at',
+        'duration_minutes',
+        'description',
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            'started_at' => 'datetime',
+            'ended_at' => 'datetime',
+            'duration_minutes' => 'integer',
+        ];
+    }
+
+    protected static function booted(): void
+    {
+        static::saved(function (TaskWorkLog $workLog) {
+            $workLog->task?->recalculateActualMinutes();
+        });
+
+        static::deleted(function (TaskWorkLog $workLog) {
+            $workLog->task?->recalculateActualMinutes();
+        });
+    }
+
+    public function task(): BelongsTo
+    {
+        return $this->belongsTo(Task::class);
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+}
