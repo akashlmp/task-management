@@ -98,8 +98,8 @@ return new class extends Migration
                 $table->date('end_date')->nullable();
                 $table->timestamps();
 
-                $table->index(['employee_id', 'project_id']);
-                $table->index(['employee_id', 'allocation_percentage']);
+                $table->index(['employee_id', 'project_id'], 'epa_emp_proj_idx');
+                $table->index(['employee_id', 'allocation_percentage'], 'epa_emp_alloc_idx');
             });
         }
     }
