@@ -27,7 +27,7 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('admin')
             ->login()
-            ->brandName('Task Management System')
+            ->brandName('Projects Management System')
             ->colors([
                 'primary' => Color::Indigo,
             ])

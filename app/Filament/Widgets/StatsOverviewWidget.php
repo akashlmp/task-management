@@ -4,7 +4,6 @@ namespace App\Filament\Widgets;
 
 use App\Models\Project;
 use App\Models\Task;
-use App\Models\TaskSlaLog;
 use App\Models\User;
 use Filament\Widgets\StatsOverviewWidget as BaseWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
@@ -17,169 +16,81 @@ class StatsOverviewWidget extends BaseWidget
     protected function getStats(): array
     {
         $user = auth()->user();
+        $isEmployee = $user && ! $user->hasRole(['admin', 'manager']);
 
-        if (! $user || $user->hasRole('admin')) {
-            return $this->getAdminStats();
+        // Projects query scoping
+        $projectsQuery = Project::query();
+        if ($isEmployee) {
+            $projectsQuery->where(function (Builder $q) use ($user) {
+                $q->where('project_manager_id', $user->id)
+                    ->orWhereHas('allocations', fn (Builder $aq) => $aq->where('employee_id', $user->id));
+            });
         }
 
-        if ($user->hasRole('manager')) {
-            return $this->getManagerStats($user);
+        // Tasks query scoping
+        $tasksQuery = Task::query();
+        if ($isEmployee) {
+            $tasksQuery->where('assigned_employee_id', $user->id);
         }
 
-        if ($user->hasRole('team_leader')) {
-            return $this->getTeamLeaderStats($user);
-        }
+        $totalProjects = (clone $projectsQuery)->count();
+        $activeProjects = (clone $projectsQuery)->whereNotIn('status', ['completed', 'cancelled'])->count();
+        $completedProjects = (clone $projectsQuery)->where('status', 'completed')->count();
 
-        return $this->getMemberStats($user);
-    }
+        $totalEmployees = User::where('status', 'active')->count();
 
-    protected function getAdminStats(): array
-    {
-        $totalProjects = Project::count();
-        $totalTasks = Task::count();
-        $overdueCount = Task::overdue()->count();
-
-        $totalEvaluated = TaskSlaLog::whereNotNull('resolved_at')->count();
-        $compliantCount = TaskSlaLog::whereNotNull('resolved_at')->where('resolution_breached', false)->count();
-        $complianceRate = $totalEvaluated > 0 ? (int) round(($compliantCount / $totalEvaluated) * 100) : 100;
+        $totalTasks = (clone $tasksQuery)->count();
+        $completedTasks = (clone $tasksQuery)->where('status', 'completed')->count();
+        $pendingTasks = (clone $tasksQuery)->whereIn('status', ['pending', 'in_progress', 'on_hold'])->count();
+        $overdueTasks = (clone $tasksQuery)->overdue()->count();
 
         return [
             Stat::make('Total Projects', $totalProjects)
-                ->description('Active & planned initiatives')
+                ->description($activeProjects . ' active in pipeline')
                 ->descriptionIcon('heroicon-m-folder')
-                ->color('primary'),
+                ->color('primary')
+                ->chart([3, 5, 7, 6, $totalProjects]),
+
+            Stat::make('Active Projects', $activeProjects)
+                ->description('In planning or execution')
+                ->descriptionIcon('heroicon-m-arrow-path')
+                ->color('info')
+                ->chart([2, 4, 3, 5, $activeProjects]),
+
+            Stat::make('Completed Projects', $completedProjects)
+                ->description('Successfully delivered')
+                ->descriptionIcon('heroicon-m-check-badge')
+                ->color('success')
+                ->chart([1, 2, 2, 3, $completedProjects]),
+
+            Stat::make('Total Employees', $totalEmployees)
+                ->description('Active workforce')
+                ->descriptionIcon('heroicon-m-users')
+                ->color('gray'),
 
             Stat::make('Total Tasks', $totalTasks)
-                ->description('Across all engineering teams')
+                ->description('Across assigned projects')
                 ->descriptionIcon('heroicon-m-clipboard-document-list')
-                ->color('info'),
+                ->color('primary')
+                ->chart([5, 8, 12, 10, $totalTasks]),
 
-            Stat::make('Overdue Tasks', $overdueCount)
-                ->description($overdueCount > 0 ? 'Requires immediate action' : 'All tasks on schedule')
-                ->descriptionIcon('heroicon-m-clock')
-                ->color($overdueCount > 0 ? 'danger' : 'success'),
-
-            Stat::make('SLA Compliance', "{$complianceRate}%")
-                ->description('System-wide SLA adherence')
-                ->descriptionIcon('heroicon-m-shield-check')
-                ->color($complianceRate >= 90 ? 'success' : 'warning'),
-        ];
-    }
-
-    protected function getManagerStats(User $user): array
-    {
-        $managedProjectsCount = Project::where('manager_id', $user->id)
-            ->orWhereHas('team', fn (Builder $q) => $q->where('manager_id', $user->id))
-            ->count();
-
-        $activeTasks = Task::active()
-            ->whereHas('project', fn (Builder $q) => $q->where('manager_id', $user->id)->orWhereHas('team', fn ($tq) => $tq->where('manager_id', $user->id)))
-            ->count();
-
-        $overdueCount = Task::overdue()
-            ->whereHas('project', fn (Builder $q) => $q->where('manager_id', $user->id)->orWhereHas('team', fn ($tq) => $tq->where('manager_id', $user->id)))
-            ->count();
-
-        $resolvedLogs = TaskSlaLog::whereNotNull('resolved_at')
-            ->whereHas('task.project', fn (Builder $q) => $q->where('manager_id', $user->id)->orWhereHas('team', fn ($tq) => $tq->where('manager_id', $user->id)));
-
-        $totalEvaluated = $resolvedLogs->count();
-        $compliantCount = (clone $resolvedLogs)->where('resolution_breached', false)->count();
-        $complianceRate = $totalEvaluated > 0 ? (int) round(($compliantCount / $totalEvaluated) * 100) : 100;
-
-        return [
-            Stat::make('Managed Projects', $managedProjectsCount)
-                ->description('Under your management')
-                ->descriptionIcon('heroicon-m-folder')
-                ->color('primary'),
-
-            Stat::make('Active Team Tasks', $activeTasks)
-                ->description('In progress, review, or pending')
-                ->descriptionIcon('heroicon-m-arrow-path')
-                ->color('info'),
-
-            Stat::make('Overdue Tasks', $overdueCount)
-                ->description($overdueCount > 0 ? 'Action required by team' : 'Zero overdue tasks')
-                ->descriptionIcon('heroicon-m-clock')
-                ->color($overdueCount > 0 ? 'danger' : 'success'),
-
-            Stat::make('Team SLA Compliance', "{$complianceRate}%")
-                ->description('Supervised projects SLA rating')
-                ->descriptionIcon('heroicon-m-shield-check')
-                ->color($complianceRate >= 90 ? 'success' : 'warning'),
-        ];
-    }
-
-    protected function getTeamLeaderStats(User $user): array
-    {
-        $teamTasksQuery = Task::where(function (Builder $q) use ($user) {
-            $q->whereHas('project.team', fn (Builder $tq) => $tq->where('team_leader_id', $user->id))
-                ->orWhereHas('assignees', fn (Builder $aq) => $aq->where('users.id', $user->id));
-        });
-
-        $teamTasksCount = (clone $teamTasksQuery)->count();
-        $inProgressCount = (clone $teamTasksQuery)->where('status', 'in_progress')->count();
-        $overdueCount = (clone $teamTasksQuery)->active()->whereNotNull('due_at')->where('due_at', '<', now())->count();
-
-        $teamMembersCount = User::whereHas('teams', function (Builder $tq) use ($user) {
-            $tq->whereIn('teams.id', $user->ledTeams()->pluck('id'));
-        })->count();
-
-        return [
-            Stat::make('Team Tasks', $teamTasksCount)
-                ->description('Assigned to led team')
-                ->descriptionIcon('heroicon-m-clipboard-document-list')
-                ->color('primary'),
-
-            Stat::make('In Progress Work', $inProgressCount)
-                ->description('Actively being developed')
-                ->descriptionIcon('heroicon-m-play')
-                ->color('warning'),
-
-            Stat::make('Overdue Items', $overdueCount)
-                ->description($overdueCount > 0 ? 'Past deadline' : 'No overdue items')
-                ->descriptionIcon('heroicon-m-clock')
-                ->color($overdueCount > 0 ? 'danger' : 'success'),
-
-            Stat::make('Team Members', $teamMembersCount)
-                ->description('Active team collaborators')
-                ->descriptionIcon('heroicon-m-user-group')
-                ->color('info'),
-        ];
-    }
-
-    protected function getMemberStats(User $user): array
-    {
-        $myTasksQuery = Task::whereHas('assignees', fn (Builder $aq) => $aq->where('users.id', $user->id));
-
-        $myTotalTasks = (clone $myTasksQuery)->count();
-        $myInProgress = (clone $myTasksQuery)->where('status', 'in_progress')->count();
-        $dueSoon = (clone $myTasksQuery)->active()
-            ->whereNotNull('due_at')
-            ->where('due_at', '<=', now()->addHours(48))
-            ->count();
-        $completed = (clone $myTasksQuery)->where('status', 'completed')->count();
-
-        return [
-            Stat::make('My Assigned Tasks', $myTotalTasks)
-                ->description('Total assigned work items')
-                ->descriptionIcon('heroicon-m-clipboard-document')
-                ->color('primary'),
-
-            Stat::make('In Progress', $myInProgress)
-                ->description('Your current active tasks')
-                ->descriptionIcon('heroicon-m-play')
-                ->color('warning'),
-
-            Stat::make('Due Soon / Urgent', $dueSoon)
-                ->description('Due within next 48 hours')
-                ->descriptionIcon('heroicon-m-clock')
-                ->color($dueSoon > 0 ? 'danger' : 'success'),
-
-            Stat::make('Completed Tasks', $completed)
-                ->description('Successfully finished tasks')
+            Stat::make('Completed Tasks', $completedTasks)
+                ->description('Finished milestones')
                 ->descriptionIcon('heroicon-m-check-circle')
-                ->color('success'),
+                ->color('success')
+                ->chart([2, 4, 6, 8, $completedTasks]),
+
+            Stat::make('Pending Tasks', $pendingTasks)
+                ->description('In progress & queued')
+                ->descriptionIcon('heroicon-m-clock')
+                ->color('warning')
+                ->chart([4, 6, 5, 7, $pendingTasks]),
+
+            Stat::make('Overdue Tasks', $overdueTasks)
+                ->description($overdueTasks > 0 ? 'Requires immediate attention' : 'All milestones on schedule')
+                ->descriptionIcon('heroicon-m-exclamation-triangle')
+                ->color($overdueTasks > 0 ? 'danger' : 'success')
+                ->chart($overdueTasks > 0 ? [1, 2, 3, 2, $overdueTasks] : [0, 0, 0, 0, 0]),
         ];
     }
 }

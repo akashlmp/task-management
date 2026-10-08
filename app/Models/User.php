@@ -5,15 +5,20 @@ namespace App\Models;
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Laravel\Sanctum\HasApiTokens;
 use Spatie\Permission\Traits\HasRoles;
 
 class User extends Authenticatable implements FilamentUser
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasFactory, Notifiable, HasRoles;
+    use HasApiTokens, HasFactory, Notifiable, HasRoles;
 
     /**
      * The attributes that are mass assignable.
@@ -28,6 +33,10 @@ class User extends Authenticatable implements FilamentUser
         'phone',
         'status',
         'joined_at',
+        'joining_date',
+        'department_id',
+        'designation',
+        'profile_image',
     ];
 
     /**
@@ -51,6 +60,7 @@ class User extends Authenticatable implements FilamentUser
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'joined_at' => 'date',
+            'joining_date' => 'date',
         ];
     }
 
@@ -59,6 +69,20 @@ class User extends Authenticatable implements FilamentUser
         static::creating(function (User $user) {
             if (blank($user->employee_code)) {
                 $user->employee_code = static::generateEmployeeCode();
+            }
+
+            if ($user->joining_date && ! $user->joined_at) {
+                $user->joined_at = $user->joining_date;
+            } elseif ($user->joined_at && ! $user->joining_date) {
+                $user->joining_date = $user->joined_at;
+            }
+        });
+
+        static::updating(function (User $user) {
+            if ($user->isDirty('joining_date') && ! $user->isDirty('joined_at')) {
+                $user->joined_at = $user->joining_date;
+            } elseif ($user->isDirty('joined_at') && ! $user->isDirty('joining_date')) {
+                $user->joining_date = $user->joined_at;
             }
         });
     }
@@ -93,58 +117,91 @@ class User extends Authenticatable implements FilamentUser
         return $this->status === 'active';
     }
 
-    public function managedTeams(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function department(): BelongsTo
+    {
+        return $this->belongsTo(Department::class, 'department_id');
+    }
+
+    public function allocations(): HasMany
+    {
+        return $this->hasMany(EmployeeProjectAllocation::class, 'employee_id');
+    }
+
+    public function allocatedProjects(): BelongsToMany
+    {
+        return $this->belongsToMany(Project::class, 'employee_project_allocations', 'employee_id', 'project_id')
+            ->withPivot(['id', 'allocation_percentage', 'role', 'start_date', 'end_date'])
+            ->withTimestamps();
+    }
+
+    public function assignedTasks(): HasMany
+    {
+        return $this->hasMany(Task::class, 'assigned_employee_id');
+    }
+
+    public function managedProjects(): HasMany
+    {
+        return $this->hasMany(Project::class, 'project_manager_id');
+    }
+
+    public function headedDepartments(): HasMany
+    {
+        return $this->hasMany(Department::class, 'department_head_id');
+    }
+
+    public function getActiveAllocationPercentageAttribute(): int
+    {
+        return (int) $this->allocations()
+            ->whereHas('project', fn (Builder $q) => $q->whereNotIn('status', ['completed', 'cancelled']))
+            ->sum('allocation_percentage');
+    }
+
+    public function getRemainingAllocationPercentageAttribute(): int
+    {
+        return max(0, 100 - $this->active_allocation_percentage);
+    }
+
+    // Existing relationship compatibility
+    public function managedTeams(): HasMany
     {
         return $this->hasMany(Team::class, 'manager_id');
     }
 
-    public function ledTeams(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function ledTeams(): HasMany
     {
         return $this->hasMany(Team::class, 'team_leader_id');
     }
 
-    public function teams(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    public function teams(): BelongsToMany
     {
         return $this->belongsToMany(Team::class, 'team_user')
             ->withPivot(['joined_at', 'is_active'])
             ->withTimestamps();
     }
 
-    public function managedProjects(): \Illuminate\Database\Eloquent\Relations\HasMany
-    {
-        return $this->hasMany(Project::class, 'manager_id');
-    }
-
-    public function projects(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    public function projects(): BelongsToMany
     {
         return $this->belongsToMany(Project::class, 'project_members')
             ->withPivot('role')
             ->withTimestamps();
     }
 
-    public function assignedTasks(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
-    {
-        return $this->belongsToMany(Task::class, 'task_assignees')
-            ->withPivot(['assigned_by', 'assigned_at', 'accepted_at', 'completed_at', 'is_primary'])
-            ->withTimestamps();
-    }
-
-    public function tasks(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    public function tasks(): HasMany
     {
         return $this->assignedTasks();
     }
 
-    public function createdTasks(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function createdTasks(): HasMany
     {
         return $this->hasMany(Task::class, 'created_by');
     }
 
-    public function workLogs(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function workLogs(): HasMany
     {
         return $this->hasMany(TaskWorkLog::class);
     }
 
-    public function comments(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function comments(): HasMany
     {
         return $this->hasMany(TaskComment::class);
     }

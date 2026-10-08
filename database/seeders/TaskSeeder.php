@@ -16,11 +16,12 @@ class TaskSeeder extends Seeder
      */
     public function run(): void
     {
-        $manager = User::where('employee_code', 'EMP-002')->first() ?? User::where('email', 'like', 'manager@%')->first();
-        $leader = User::where('employee_code', 'EMP-003')->first() ?? User::where('email', 'like', 'leader@%')->first();
-        $alex = User::where('employee_code', 'EMP-004')->first() ?? User::where('email', 'like', 'alex@%')->first();
-        $elena = User::where('employee_code', 'EMP-005')->first() ?? User::where('email', 'like', 'elena@%')->first();
-        $marcus = User::where('employee_code', 'EMP-006')->first() ?? User::where('email', 'like', 'marcus@%')->first();
+        $manager = User::where('email', 'manager@gmail.com')->first();
+        $leader = User::where('email', 'leader@gmail.com')->first();
+        $employee = User::where('email', 'employee@gmail.com')->first();
+        $alex = User::where('email', 'alex@gmail.com')->first();
+        $elena = User::where('email', 'elena@gmail.com')->first();
+        $marcus = User::where('email', 'marcus@gmail.com')->first();
 
         $portal = Project::where('code', 'PRJ-PORTAL')->first();
         $gateway = Project::where('code', 'PRJ-GATEWAY')->first();
@@ -31,153 +32,145 @@ class TaskSeeder extends Seeder
         }
 
         // 1. Portal - Task 1 (Completed)
-        $t1 = Task::firstOrCreate(
-            ['project_id' => $portal->id, 'title' => 'Design Responsive Navigation & Header System'],
+        $t1 = Task::updateOrCreate(
+            ['code' => 'TSK-PORTAL-01'],
             [
+                'project_id' => $portal->id,
+                'name' => 'Design Responsive Navigation & Header System',
+                'title' => 'Design Responsive Navigation & Header System',
                 'description' => 'Build fluid navigation bar with responsive mobile sheet, accessible keyboard focus, and avatar menu.',
-                'created_by' => $manager->id,
+                'created_by' => $manager?->id,
+                'assigned_employee_id' => $elena?->id,
                 'priority' => 'high',
                 'status' => 'completed',
-                'start_at' => now()->subDays(3),
-                'due_at' => now()->addDays(2),
-                'completed_at' => now()->subDay(),
-                'estimated_minutes' => 240,
+                'progress' => 100,
+                'start_date' => now()->subDays(15)->toDateString(),
+                'due_date' => now()->subDays(5)->toDateString(),
+                'completed_at' => now()->subDays(5),
+                'estimated_hours' => 12.0,
+                'actual_hours' => 10.5,
             ]
         );
-        $t1->assignees()->syncWithoutDetaching([
-            $elena->id => ['assigned_by' => $leader->id, 'assigned_at' => now()->subDays(3), 'is_primary' => true],
-            $alex->id => ['assigned_by' => $leader->id, 'assigned_at' => now()->subDays(3), 'is_primary' => false],
-        ]);
-        TaskWorkLog::firstOrCreate(
-            ['task_id' => $t1->id, 'user_id' => $elena->id, 'duration_minutes' => 180],
-            ['description' => 'Completed Figma component translations and CSS adjustments.', 'started_at' => now()->subDays(2)]
-        );
-        TaskWorkLog::firstOrCreate(
-            ['task_id' => $t1->id, 'user_id' => $alex->id, 'duration_minutes' => 60],
-            ['description' => 'Reviewed accessibility guidelines and verified screen reader labels.', 'started_at' => now()->subDay()]
-        );
-        TaskComment::firstOrCreate(
-            ['task_id' => $t1->id, 'user_id' => $elena->id, 'comment' => 'Design review approved by team lead. Merging to main branch.']
-        );
+        if ($elena && $alex) {
+            $t1->assignees()->syncWithoutDetaching([
+                $elena->id => ['assigned_by' => $leader?->id, 'assigned_at' => now()->subDays(15), 'is_primary' => true],
+                $alex->id => ['assigned_by' => $leader?->id, 'assigned_at' => now()->subDays(15), 'is_primary' => false],
+            ]);
+        }
 
-        // 2. Portal - Task 2 (In Progress)
-        $t2 = Task::firstOrCreate(
-            ['project_id' => $portal->id, 'title' => 'Implement OAuth2 Social & SSO Authentication'],
+        // 2. Portal - Task 2 (In Progress - Assigned to Employee)
+        $t2 = Task::updateOrCreate(
+            ['code' => 'TSK-PORTAL-02'],
             [
+                'project_id' => $portal->id,
+                'name' => 'Implement OAuth2 Social & SSO Authentication',
+                'title' => 'Implement OAuth2 Social & SSO Authentication',
                 'description' => 'Integrate Google and GitHub social login with OAuth2 state token validation and automatic user provisioning.',
-                'created_by' => $leader->id,
-                'priority' => 'critical',
+                'created_by' => $leader?->id,
+                'assigned_employee_id' => $employee?->id,
+                'priority' => 'urgent',
                 'status' => 'in_progress',
-                'start_at' => now()->subHours(4),
-                'due_at' => now()->addHours(20),
-                'estimated_minutes' => 300,
+                'progress' => 60,
+                'start_date' => now()->subDays(5)->toDateString(),
+                'due_date' => now()->addDays(5)->toDateString(),
+                'estimated_hours' => 16.0,
+                'actual_hours' => 9.5,
             ]
         );
-        $t2->assignees()->syncWithoutDetaching([
-            $alex->id => ['assigned_by' => $leader->id, 'assigned_at' => now()->subHours(5), 'is_primary' => true],
-        ]);
-        TaskWorkLog::firstOrCreate(
-            ['task_id' => $t2->id, 'user_id' => $alex->id, 'duration_minutes' => 120],
-            ['description' => 'Configured OAuth redirect handlers and token validation.', 'started_at' => now()->subHours(2)]
-        );
-        TaskComment::firstOrCreate(
-            ['task_id' => $t2->id, 'user_id' => $alex->id, 'comment' => 'Working on token exchange and PKCE validation. Google provider works as expected.']
-        );
+        if ($employee) {
+            $t2->assignees()->syncWithoutDetaching([
+                $employee->id => ['assigned_by' => $leader?->id, 'assigned_at' => now()->subDays(5), 'is_primary' => true],
+            ]);
+        }
 
-        // 3. Portal - Task 3 (Assigned)
-        $t3 = Task::firstOrCreate(
-            ['project_id' => $portal->id, 'title' => 'User Profile Notification Preferences Panel'],
+        // 3. Portal - Task 3 (Pending)
+        $t3 = Task::updateOrCreate(
+            ['code' => 'TSK-PORTAL-03'],
             [
+                'project_id' => $portal->id,
+                'name' => 'User Profile Notification Preferences Panel',
+                'title' => 'User Profile Notification Preferences Panel',
                 'description' => 'Build user settings toggle panel to control email, in-app, and push notification frequencies.',
-                'created_by' => $manager->id,
+                'created_by' => $manager?->id,
+                'assigned_employee_id' => $alex?->id,
                 'priority' => 'medium',
-                'status' => 'assigned',
-                'due_at' => now()->addDays(3),
-                'estimated_minutes' => 180,
+                'status' => 'pending',
+                'progress' => 0,
+                'start_date' => now()->toDateString(),
+                'due_date' => now()->addDays(10)->toDateString(),
+                'estimated_hours' => 8.0,
+                'actual_hours' => 0,
             ]
         );
-        $t3->assignees()->syncWithoutDetaching([
-            $elena->id => ['assigned_by' => $leader->id, 'assigned_at' => now()->subHours(2), 'is_primary' => true],
-        ]);
 
-        // 4. Gateway - Task 4 (In Progress)
-        $t4 = Task::firstOrCreate(
-            ['project_id' => $gateway->id, 'title' => 'Distributed Token Bucket Rate Limiting Service'],
+        // 4. Gateway - Task 4 (OVERDUE - In Progress - Assigned to Employee)
+        $t4 = Task::updateOrCreate(
+            ['code' => 'TSK-GATEWAY-01'],
             [
+                'project_id' => $gateway->id,
+                'name' => 'Distributed Token Bucket Rate Limiting Service',
+                'title' => 'Distributed Token Bucket Rate Limiting Service',
                 'description' => 'Implement Redis-backed sliding window rate limiter with tiered API key quotas and rate limit header responses.',
-                'created_by' => $manager->id,
-                'priority' => 'critical',
+                'created_by' => $manager?->id,
+                'assigned_employee_id' => $employee?->id,
+                'priority' => 'urgent',
                 'status' => 'in_progress',
-                'start_at' => now()->subHours(6),
-                'due_at' => now()->addHours(18),
-                'estimated_minutes' => 360,
+                'progress' => 40,
+                'start_date' => now()->subDays(10)->toDateString(),
+                'due_date' => now()->subDays(2)->toDateString(), // OVERDUE by 2 days!
+                'estimated_hours' => 20.0,
+                'actual_hours' => 14.0,
             ]
         );
-        $t4->assignees()->syncWithoutDetaching([
-            $marcus->id => ['assigned_by' => $leader->id, 'assigned_at' => now()->subHours(7), 'is_primary' => true],
-            $alex->id => ['assigned_by' => $leader->id, 'assigned_at' => now()->subHours(7), 'is_primary' => false],
-        ]);
-        TaskWorkLog::firstOrCreate(
-            ['task_id' => $t4->id, 'user_id' => $marcus->id, 'duration_minutes' => 240],
-            ['description' => 'Built Redis Lua script for atomic sliding window evaluation.', 'started_at' => now()->subHours(4)]
-        );
-        TaskWorkLog::firstOrCreate(
-            ['task_id' => $t4->id, 'user_id' => $alex->id, 'duration_minutes' => 90],
-            ['description' => 'Implemented HTTP middleware and response header formatting.', 'started_at' => now()->subHours(2)]
-        );
-        TaskComment::firstOrCreate(
-            ['task_id' => $t4->id, 'user_id' => $marcus->id, 'comment' => 'Redis script benchmarked under 2ms execution time for 10k requests.']
-        );
+        if ($employee) {
+            $t4->assignees()->syncWithoutDetaching([
+                $employee->id => ['assigned_by' => $leader?->id, 'assigned_at' => now()->subDays(10), 'is_primary' => true],
+            ]);
+        }
 
-        // 5. Gateway - Task 5 (Review)
-        $t5 = Task::firstOrCreate(
-            ['project_id' => $gateway->id, 'title' => 'Centralized OpenTelemetry Distributed Tracing'],
+        // 5. Gateway - Task 5 (OVERDUE - Pending)
+        $t5 = Task::updateOrCreate(
+            ['code' => 'TSK-GATEWAY-02'],
             [
+                'project_id' => $gateway->id,
+                'name' => 'Centralized OpenTelemetry Distributed Tracing',
+                'title' => 'Centralized OpenTelemetry Distributed Tracing',
                 'description' => 'Instrument core HTTP and database drivers to emit W3C Trace Context and Jaeger spans.',
-                'created_by' => $leader->id,
+                'created_by' => $leader?->id,
+                'assigned_employee_id' => $marcus?->id,
                 'priority' => 'high',
-                'status' => 'review',
-                'start_at' => now()->subDays(2),
-                'due_at' => now()->addDay(),
-                'estimated_minutes' => 240,
+                'status' => 'pending',
+                'progress' => 20,
+                'start_date' => now()->subDays(8)->toDateString(),
+                'due_date' => now()->subDays(1)->toDateString(), // OVERDUE by 1 day!
+                'estimated_hours' => 14.0,
+                'actual_hours' => 3.0,
             ]
-        );
-        $t5->assignees()->syncWithoutDetaching([
-            $alex->id => ['assigned_by' => $leader->id, 'assigned_at' => now()->subDays(2), 'is_primary' => true],
-        ]);
-        TaskWorkLog::firstOrCreate(
-            ['task_id' => $t5->id, 'user_id' => $alex->id, 'duration_minutes' => 150],
-            ['description' => 'Added OpenTelemetry SDK middleware and span processors.', 'started_at' => now()->subDay()]
-        );
-        TaskComment::firstOrCreate(
-            ['task_id' => $t5->id, 'user_id' => $alex->id, 'comment' => 'Submitted PR #42 for code review. Staging collector verified.']
         );
 
-        // 6. E2E - Task 6 (Completed)
-        $t6 = Task::firstOrCreate(
-            ['project_id' => $e2e->id, 'title' => 'Automated Playwright Auth Flow Validation'],
+        // 6. E2E - Task 6 (In Progress)
+        $t6 = Task::updateOrCreate(
+            ['code' => 'TSK-E2E-01'],
             [
+                'project_id' => $e2e->id,
+                'name' => 'Automated Playwright Auth Flow Validation',
+                'title' => 'Automated Playwright Auth Flow Validation',
                 'description' => 'Write end-to-end regression tests validating login, password reset, and session expiry handling.',
-                'created_by' => $leader->id,
+                'created_by' => $leader?->id,
+                'assigned_employee_id' => $marcus?->id,
                 'priority' => 'medium',
-                'status' => 'completed',
-                'start_at' => now()->subDays(2),
-                'due_at' => now()->addDay(),
-                'completed_at' => now()->subHours(6),
-                'estimated_minutes' => 180,
+                'status' => 'in_progress',
+                'progress' => 30,
+                'start_date' => now()->subDays(3)->toDateString(),
+                'due_date' => now()->addDays(7)->toDateString(),
+                'estimated_hours' => 10.0,
+                'actual_hours' => 3.0,
             ]
         );
-        $t6->assignees()->syncWithoutDetaching([
-            $elena->id => ['assigned_by' => $leader->id, 'assigned_at' => now()->subDays(2), 'is_primary' => true],
-            $marcus->id => ['assigned_by' => $leader->id, 'assigned_at' => now()->subDays(2), 'is_primary' => false],
-        ]);
-        TaskWorkLog::firstOrCreate(
-            ['task_id' => $t6->id, 'user_id' => $elena->id, 'duration_minutes' => 90],
-            ['description' => 'Auth flow tests written and passing in local environment.', 'started_at' => now()->subDay()]
-        );
-        TaskWorkLog::firstOrCreate(
-            ['task_id' => $t6->id, 'user_id' => $marcus->id, 'duration_minutes' => 60],
-            ['description' => 'Configured GitHub Actions workflow matrix for Chromium and Firefox.', 'started_at' => now()->subHours(10)]
-        );
+
+        // Recalculate parent projects progress
+        $portal->recalculateProgress();
+        $gateway->recalculateProgress();
+        $e2e->recalculateProgress();
     }
 }

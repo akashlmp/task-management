@@ -72,6 +72,17 @@ class Reports extends Page implements HasTable
         $this->loadDefaultActiveTab();
     }
 
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('print_summary')
+                ->label('Printable / PDF Executive Report')
+                ->icon('heroicon-o-printer')
+                ->color('success')
+                ->url(route('reports.printable'), shouldOpenInNewTab: true),
+        ];
+    }
+
     public function getTabs(): array
     {
         return [
@@ -664,11 +675,6 @@ class Reports extends Page implements HasTable
             teamId: $selectedTeamId ? (int) $selectedTeamId : null,
             projectId: $this->selectedProjectId ? (int) $this->selectedProjectId : null
         );
-    }
-
-    protected function getHeaderActions(): array
-    {
-        return [];
     }
 
     public function exportCurrentReport(): StreamedResponse

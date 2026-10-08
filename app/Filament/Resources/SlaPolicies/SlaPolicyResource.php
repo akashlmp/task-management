@@ -32,6 +32,11 @@ class SlaPolicyResource extends Resource
 
     protected static ?int $navigationSort = 1;
 
+    public static function canViewAny(): bool
+    {
+        return auth()->user()?->hasRole(['admin', 'manager']) ?? false;
+    }
+
     public static function form(Schema $schema): Schema
     {
         return $schema

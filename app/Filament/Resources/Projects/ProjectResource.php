@@ -5,9 +5,12 @@ namespace App\Filament\Resources\Projects;
 use App\Filament\Resources\Projects\Pages\CreateProject;
 use App\Filament\Resources\Projects\Pages\EditProject;
 use App\Filament\Resources\Projects\Pages\ListProjects;
-use App\Filament\Resources\Projects\RelationManagers\ProjectMembersRelationManager;
+use App\Filament\Resources\Projects\RelationManagers\ProjectAllocationsRelationManager;
+use App\Filament\Resources\Projects\RelationManagers\ProjectTasksRelationManager;
 use App\Models\Project;
 use BackedEnum;
+use Filament\Actions\Action;
+use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -21,45 +24,55 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ProjectResource extends Resource
 {
     protected static ?string $model = Project::class;
 
-    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-folder';
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-folder-open';
 
     protected static string|\UnitEnum|null $navigationGroup = 'Project Management';
 
     protected static ?int $navigationSort = 1;
+
+    public static function canCreate(): bool
+    {
+        $user = auth()->user();
+
+        return $user && ($user->hasRole(['admin', 'manager']) || $user->can('projects.create'));
+    }
 
     public static function form(Schema $schema): Schema
     {
         return $schema
             ->components([
                 TextInput::make('name')
+                    ->label('Project Title')
                     ->required()
                     ->maxLength(255),
                 TextInput::make('code')
                     ->label('Project Code')
-                    ->required()
+                    ->placeholder('e.g. PRJ-001')
                     ->unique(ignoreRecord: true)
                     ->maxLength(50)
                     ->extraInputAttributes(['style' => 'text-transform: uppercase;'])
                     ->dehydrateStateUsing(fn ($state) => strtoupper((string) $state)),
-                Select::make('team_id')
-                    ->relationship('team', 'name')
-                    ->searchable()
-                    ->preload()
-                    ->nullable(),
-                Select::make('manager_id')
-                    ->relationship('manager', 'name', modifyQueryUsing: fn (Builder $query) => $query->role(['manager', 'admin']))
+                TextInput::make('client_company')
+                    ->label('Client / Organization')
+                    ->placeholder('e.g. Acme Corporation')
+                    ->maxLength(255),
+                Select::make('project_manager_id')
+                    ->label('Project Manager')
+                    ->relationship('projectManager', 'name', modifyQueryUsing: fn (Builder $q) => $q->role(['manager', 'admin']))
                     ->searchable()
                     ->preload()
                     ->nullable(),
                 Select::make('status')
                     ->options([
                         'planning' => 'Planning',
-                        'active' => 'Active',
+                        'in_progress' => 'In Progress',
                         'on_hold' => 'On Hold',
                         'completed' => 'Completed',
                         'cancelled' => 'Cancelled',
@@ -71,14 +84,28 @@ class ProjectResource extends Resource
                         'low' => 'Low',
                         'medium' => 'Medium',
                         'high' => 'High',
-                        'critical' => 'Critical',
+                        'urgent' => 'Urgent',
                     ])
                     ->default('medium')
                     ->required(),
+                TextInput::make('budget')
+                    ->label('Budget')
+                    ->numeric()
+                    ->prefix('$')
+                    ->default(0),
+                TextInput::make('progress')
+                    ->label('Progress (%)')
+                    ->numeric()
+                    ->minValue(0)
+                    ->maxValue(100)
+                    ->suffix('%')
+                    ->default(0)
+                    ->helperText('Automatically updated based on task completions'),
                 DatePicker::make('start_date')
-                    ->nullable(),
-                DatePicker::make('due_date')
-                    ->nullable(),
+                    ->label('Start Date')
+                    ->default(now()),
+                DatePicker::make('deadline')
+                    ->label('Target Deadline'),
                 Textarea::make('description')
                     ->rows(3)
                     ->columnSpanFull()
@@ -89,28 +116,65 @@ class ProjectResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            ->headerActions([
+                Action::make('export_csv')
+                    ->label('Export All to CSV')
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->color('success')
+                    ->action(function (): StreamedResponse {
+                        return response()->streamDownload(function () {
+                            $handle = fopen('php://output', 'w');
+                            fputcsv($handle, ['Code', 'Project Name', 'Client', 'Manager', 'Status', 'Priority', 'Budget', 'Progress', 'Start Date', 'Deadline']);
+
+                            Project::with('projectManager')->chunk(100, function ($projects) use ($handle) {
+                                foreach ($projects as $prj) {
+                                    fputcsv($handle, [
+                                        $prj->code,
+                                        $prj->name,
+                                        $prj->client_company ?? 'Internal',
+                                        $prj->projectManager?->name ?? 'Unassigned',
+                                        $prj->status,
+                                        $prj->priority,
+                                        $prj->budget,
+                                        "{$prj->progress}%",
+                                        $prj->start_date?->format('Y-m-d') ?? '',
+                                        $prj->deadline?->format('Y-m-d') ?? '',
+                                    ]);
+                                }
+                            });
+
+                            fclose($handle);
+                        }, 'projects-report-' . now()->format('Y-m-d') . '.csv', [
+                            'Content-Type' => 'text/csv',
+                        ]);
+                    }),
+            ])
             ->columns([
                 TextColumn::make('code')
                     ->label('Code')
+                    ->weight('bold')
                     ->searchable()
-                    ->sortable()
-                    ->weight('bold'),
+                    ->sortable(),
                 TextColumn::make('name')
+                    ->label('Project Name')
                     ->searchable()
                     ->sortable(),
-                TextColumn::make('team.name')
-                    ->label('Team')
+                TextColumn::make('client_company')
+                    ->label('Client')
+                    ->placeholder('Internal')
                     ->searchable()
                     ->sortable(),
-                TextColumn::make('manager.name')
+                TextColumn::make('projectManager.name')
                     ->label('Manager')
-                    ->searchable()
-                    ->sortable(),
+                    ->placeholder('Unassigned')
+                    ->badge()
+                    ->color('gray')
+                    ->searchable(),
                 TextColumn::make('status')
                     ->badge()
                     ->colors([
                         'gray' => 'planning',
-                        'info' => 'active',
+                        'info' => 'in_progress',
                         'warning' => 'on_hold',
                         'success' => 'completed',
                         'danger' => 'cancelled',
@@ -121,25 +185,42 @@ class ProjectResource extends Resource
                         'gray' => 'low',
                         'info' => 'medium',
                         'warning' => 'high',
-                        'danger' => 'critical',
+                        'danger' => 'urgent',
                     ]),
-                TextColumn::make('due_date')
+                TextColumn::make('progress')
+                    ->label('Progress')
+                    ->formatStateUsing(fn ($state) => "{$state}%")
+                    ->badge()
+                    ->color(function (int $state): string {
+                        if ($state >= 100) {
+                            return 'success';
+                        }
+                        if ($state >= 50) {
+                            return 'info';
+                        }
+
+                        return 'gray';
+                    })
+                    ->sortable(),
+                TextColumn::make('budget')
+                    ->money('USD')
+                    ->sortable(),
+                TextColumn::make('deadline')
+                    ->label('Deadline')
                     ->date()
-                    ->sortable(),
-                TextColumn::make('members_count')
-                    ->counts('members')
-                    ->label('Members')
-                    ->sortable(),
-                TextColumn::make('created_at')
-                    ->dateTime()
                     ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
+                    ->color(fn (Project $record) => ($record->deadline && $record->deadline < now()->startOfDay() && ! $record->isClosed()) ? 'danger' : null),
+                TextColumn::make('tasks_count')
+                    ->counts('tasks')
+                    ->label('Tasks')
+                    ->badge()
+                    ->sortable(),
             ])
             ->filters([
                 SelectFilter::make('status')
                     ->options([
                         'planning' => 'Planning',
-                        'active' => 'Active',
+                        'in_progress' => 'In Progress',
                         'on_hold' => 'On Hold',
                         'completed' => 'Completed',
                         'cancelled' => 'Cancelled',
@@ -149,18 +230,42 @@ class ProjectResource extends Resource
                         'low' => 'Low',
                         'medium' => 'Medium',
                         'high' => 'High',
-                        'critical' => 'Critical',
+                        'urgent' => 'Urgent',
                     ]),
-                SelectFilter::make('team')
-                    ->relationship('team', 'name'),
-                SelectFilter::make('manager')
-                    ->relationship('manager', 'name'),
+                SelectFilter::make('projectManager')
+                    ->relationship('projectManager', 'name'),
             ])
             ->recordActions([
                 EditAction::make(),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
+                    BulkAction::make('export_selected')
+                        ->label('Export Selected to CSV')
+                        ->icon('heroicon-o-arrow-down-tray')
+                        ->action(function (Collection $records): StreamedResponse {
+                            return response()->streamDownload(function () use ($records) {
+                                $handle = fopen('php://output', 'w');
+                                fputcsv($handle, ['Code', 'Project Name', 'Client', 'Manager', 'Status', 'Priority', 'Budget', 'Progress', 'Start Date', 'Deadline']);
+                                foreach ($records as $prj) {
+                                    fputcsv($handle, [
+                                        $prj->code,
+                                        $prj->name,
+                                        $prj->client_company ?? 'Internal',
+                                        $prj->projectManager?->name ?? 'Unassigned',
+                                        $prj->status,
+                                        $prj->priority,
+                                        $prj->budget,
+                                        "{$prj->progress}%",
+                                        $prj->start_date?->format('Y-m-d') ?? '',
+                                        $prj->deadline?->format('Y-m-d') ?? '',
+                                    ]);
+                                }
+                                fclose($handle);
+                            }, 'selected-projects-' . now()->format('Y-m-d') . '.csv', [
+                                'Content-Type' => 'text/csv',
+                            ]);
+                        }),
                     DeleteBulkAction::make(),
                 ]),
             ]);
@@ -176,26 +281,21 @@ class ProjectResource extends Resource
         }
 
         if ($user->hasRole('manager')) {
-            return $query->where(function (Builder $q) use ($user) {
-                $q->where('manager_id', $user->id)
-                    ->orWhereHas('team', fn (Builder $tq) => $tq->where('manager_id', $user->id));
-            });
+            return $query;
         }
 
-        if ($user->hasRole('team_leader')) {
-            return $query->where(function (Builder $q) use ($user) {
-                $q->whereHas('team', fn (Builder $tq) => $tq->where('team_leader_id', $user->id))
-                    ->orWhereHas('members', fn (Builder $mq) => $mq->where('users.id', $user->id));
-            });
-        }
-
-        return $query->whereHas('members', fn (Builder $q) => $q->where('users.id', $user->id));
+        // Employee Role: only view their assigned projects
+        return $query->where(function (Builder $q) use ($user) {
+            $q->where('project_manager_id', $user->id)
+                ->orWhereHas('allocations', fn (Builder $aq) => $aq->where('employee_id', $user->id));
+        });
     }
 
     public static function getRelations(): array
     {
         return [
-            ProjectMembersRelationManager::class,
+            ProjectTasksRelationManager::class,
+            ProjectAllocationsRelationManager::class,
         ];
     }
 

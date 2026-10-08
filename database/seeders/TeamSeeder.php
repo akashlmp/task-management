@@ -13,11 +13,11 @@ class TeamSeeder extends Seeder
      */
     public function run(): void
     {
-        $manager = User::where('employee_code', 'EMP-002')->first() ?? User::where('email', 'like', 'manager@%')->first();
-        $leader = User::where('employee_code', 'EMP-003')->first() ?? User::where('email', 'like', 'leader@%')->first();
-        $alex = User::where('employee_code', 'EMP-004')->first() ?? User::where('email', 'like', 'alex@%')->first();
-        $elena = User::where('employee_code', 'EMP-005')->first() ?? User::where('email', 'like', 'elena@%')->first();
-        $marcus = User::where('employee_code', 'EMP-006')->first() ?? User::where('email', 'like', 'marcus@%')->first();
+        $manager = User::where('email', 'manager@gmail.com')->first();
+        $leader = User::where('email', 'leader@gmail.com')->first();
+        $alex = User::where('email', 'alex@gmail.com')->first();
+        $elena = User::where('email', 'elena@gmail.com')->first();
+        $marcus = User::where('email', 'marcus@gmail.com')->first();
 
         // 1. Frontend & UI Engineering
         $frontendTeam = Team::firstOrCreate(
